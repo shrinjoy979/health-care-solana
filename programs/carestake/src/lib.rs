@@ -33,6 +33,9 @@ pub mod crypto_healthcare {
         ctx: Context<InitializeProtocol>,
         initial_supply: u64,
     ) -> Result<()> {
+        // Take AccountInfo FIRST (before mutable borrow)
+        let protocol_ai = ctx.accounts.protocol_state.to_account_info();
+
         let protocol = &mut ctx.accounts.protocol_state;
         protocol.authority = ctx.accounts.authority.key();
         protocol.health_mint = ctx.accounts.health_mint.key();
@@ -52,7 +55,7 @@ pub mod crypto_healthcare {
                 MintTo {
                     mint: ctx.accounts.health_mint.to_account_info(),
                     to: ctx.accounts.treasury.to_account_info(),
-                    authority: ctx.accounts.protocol_state.to_account_info(),
+                    authority: protocol_ai,
                 },
                 signer,
             ),
@@ -79,6 +82,9 @@ pub mod crypto_healthcare {
     ) -> Result<()> {
         require!(onboarding_tokens >= MIN_STAKE_AMOUNT, HealthError::InsufficientStake);
 
+        // Take AccountInfo FIRST (before mutable borrow)
+        let protocol_ai = ctx.accounts.protocol_state.to_account_info();
+
         let patient = &mut ctx.accounts.patient_profile;
         patient.wallet = ctx.accounts.patient_wallet.key();
         patient.name_hash = name_hash;
@@ -103,7 +109,7 @@ pub mod crypto_healthcare {
                 Transfer {
                     from: ctx.accounts.treasury.to_account_info(),
                     to: ctx.accounts.patient_token_account.to_account_info(),
-                    authority: ctx.accounts.protocol_state.to_account_info(),
+                    authority: protocol_ai,
                 },
                 signer,
             ),
@@ -130,6 +136,8 @@ pub mod crypto_healthcare {
         specialization: Specialization,
         onboarding_tokens: u64,
     ) -> Result<()> {
+        let protocol_ai = ctx.accounts.protocol_state.to_account_info();
+
         let prac = &mut ctx.accounts.practitioner_profile;
         prac.wallet = ctx.accounts.practitioner_wallet.key();
         prac.name_hash = name_hash;
@@ -157,7 +165,7 @@ pub mod crypto_healthcare {
                 Transfer {
                     from: ctx.accounts.treasury.to_account_info(),
                     to: ctx.accounts.practitioner_token_account.to_account_info(),
-                    authority: ctx.accounts.protocol_state.to_account_info(),
+                    authority: protocol_ai,
                 },
                 signer,
             ),
@@ -728,7 +736,7 @@ pub struct RecordSession<'info> {
             practitioner_wallet.key().as_ref()
         ],
         bump = stake_pot.bump,
-        has_one = practitioner,
+        constraint = stake_pot.practitioner == practitioner_wallet.key(),
     )]
     pub stake_pot: Account<'info, StakePot>,
 
