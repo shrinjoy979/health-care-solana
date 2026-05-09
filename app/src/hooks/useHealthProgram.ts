@@ -2,11 +2,19 @@ import { useEffect, useState, useCallback } from "react";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { Program, AnchorProvider, BN } from "@coral-xyz/anchor";
 import { PublicKey } from "@solana/web3.js";
+// import {
+//   getAssociatedTokenAddress,
+//   TOKEN_PROGRAM_ID,
+// } from "@solana/spl-token";
+import idl from "../idl.json";
+
 import {
   getAssociatedTokenAddress,
+  createAssociatedTokenAccountInstruction,
   TOKEN_PROGRAM_ID,
+  ASSOCIATED_TOKEN_PROGRAM_ID,
 } from "@solana/spl-token";
-import idl from "../idl.json";
+import { Transaction } from "@solana/web3.js";
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const PROGRAM_ID = new PublicKey("B3hcYp5nnHH8iWXoEsF2UJpNy82fi7thTHeKJBoNq4pa");
@@ -234,52 +242,120 @@ export function useHealthProgram() {
   }, []);
 
   // ── registerPatient ───────────────────────────────────────────────────────
-  const registerPatient = useCallback(async (name: string) => {
-    if (!program || !wallet.publicKey) throw new Error("Wallet not connected");
+  // const registerPatient = useCallback(async (name: string) => {
+  //   if (!program || !wallet.publicKey) throw new Error("Wallet not connected");
 
-    const [protocolPda] = PublicKey.findProgramAddressSync([PROTOCOL_SEED], PROGRAM_ID);
-    const [patientPda]  = PublicKey.findProgramAddressSync(
-      [PATIENT_SEED, wallet.publicKey.toBuffer()], PROGRAM_ID
-    );
+  //   const [protocolPda] = PublicKey.findProgramAddressSync([PROTOCOL_SEED], PROGRAM_ID);
+  //   const [patientPda]  = PublicKey.findProgramAddressSync(
+  //     [PATIENT_SEED, wallet.publicKey.toBuffer()], PROGRAM_ID
+  //   );
 
-    // Always re-fetch fresh so we have latest mint + can resolve treasury
-    const acc  = await (program.account as any).protocolState.fetch(protocolPda);
-    const mint: PublicKey = acc.healthMint;
+  //   // Always re-fetch fresh so we have latest mint + can resolve treasury
+  //   const acc  = await (program.account as any).protocolState.fetch(protocolPda);
+  //   const mint: PublicKey = acc.healthMint;
 
-    // Use cached treasury if available, otherwise discover
-    const treasury = treasuryPubkey ?? await resolveTreasury(acc, mint, protocolPda);
-    if (!treasuryPubkey) setTreasuryPubkey(treasury);
+  //   // Use cached treasury if available, otherwise discover
+  //   const treasury = treasuryPubkey ?? await resolveTreasury(acc, mint, protocolPda);
+  //   if (!treasuryPubkey) setTreasuryPubkey(treasury);
 
-    console.log("registerPatient — treasury:", treasury.toBase58(), "mint:", mint.toBase58());
+  //   console.log("registerPatient — treasury:", treasury.toBase58(), "mint:", mint.toBase58());
 
-    const nameHash = Array.from(
-      new Uint8Array(
-        await crypto.subtle.digest("SHA-256", new TextEncoder().encode(name))
+  //   const nameHash = Array.from(
+  //     new Uint8Array(
+  //       await crypto.subtle.digest("SHA-256", new TextEncoder().encode(name))
+  //     )
+  //   );
+
+  //   const patientAta = await getAssociatedTokenAddress(mint, wallet.publicKey);
+
+  //   setLoading(true);
+  //   try {
+  //     const tx = await (program.methods as any)
+  //       .registerPatient(nameHash, new BN(500_000_000))
+  //       .accounts({
+  //         patientProfile:      patientPda,
+  //         patientTokenAccount: patientAta,
+  //         protocolState:       protocolPda,
+  //         treasury,
+  //         healthMint:          mint,
+  //         patientWallet:       wallet.publicKey,
+  //       })
+  //       .rpc();
+
+  //     console.log("Registered! tx:", tx);
+  //     await fetchAll();
+  //   } finally {
+  //     setLoading(false);
+  //   }
+  // }, [program, wallet.publicKey, connection, treasuryPubkey, resolveTreasury, fetchAll]);
+
+
+const registerPatient = useCallback(async (name: string) => {
+  if (!program || !wallet.publicKey) throw new Error("Wallet not connected");
+
+  const [protocolPda] = PublicKey.findProgramAddressSync([PROTOCOL_SEED], PROGRAM_ID);
+  const [patientPda]  = PublicKey.findProgramAddressSync(
+    [PATIENT_SEED, wallet.publicKey.toBuffer()], PROGRAM_ID
+  );
+
+  const acc  = await (program.account as any).protocolState.fetch(protocolPda);
+  const mint: PublicKey = acc.healthMint;
+
+  const treasury = treasuryPubkey ?? await resolveTreasury(acc, mint, protocolPda);
+  if (!treasuryPubkey) setTreasuryPubkey(treasury);
+
+  const nameHash = Array.from(
+    new Uint8Array(
+      await crypto.subtle.digest("SHA-256", new TextEncoder().encode(name))
+    )
+  );
+
+  const patientAta = await getAssociatedTokenAddress(mint, wallet.publicKey);
+
+  // ── Step 1: create ATA if it doesn't exist yet ──────────────────────────
+  const ataInfo = await connection.getAccountInfo(patientAta);
+  if (!ataInfo) {
+    const createAtaTx = new Transaction().add(
+      createAssociatedTokenAccountInstruction(
+        wallet.publicKey,          // payer
+        patientAta,                // ata address
+        wallet.publicKey,          // owner
+        mint,                      // mint
+        TOKEN_PROGRAM_ID,
+        ASSOCIATED_TOKEN_PROGRAM_ID,
       )
     );
+    const { blockhash } = await connection.getLatestBlockhash();
+    createAtaTx.recentBlockhash = blockhash;
+    createAtaTx.feePayer = wallet.publicKey;
 
-    const patientAta = await getAssociatedTokenAddress(mint, wallet.publicKey);
+    const signed = await wallet.signTransaction!(createAtaTx);
+    const sig = await connection.sendRawTransaction(signed.serialize());
+    await connection.confirmTransaction(sig, "confirmed");
+    console.log("ATA created:", sig);
+  }
 
-    setLoading(true);
-    try {
-      const tx = await (program.methods as any)
-        .registerPatient(nameHash, new BN(500_000_000))
-        .accounts({
-          patientProfile:      patientPda,
-          patientTokenAccount: patientAta,
-          protocolState:       protocolPda,
-          treasury,
-          healthMint:          mint,
-          patientWallet:       wallet.publicKey,
-        })
-        .rpc();
+  // ── Step 2: register patient ─────────────────────────────────────────────
+  setLoading(true);
+  try {
+    const tx = await (program.methods as any)
+      .registerPatient(nameHash, new BN(500_000_000))
+      .accounts({
+        patientProfile:      patientPda,
+        patientTokenAccount: patientAta,
+        protocolState:       protocolPda,
+        treasury,
+        healthMint:          mint,
+        patientWallet:       wallet.publicKey,
+      })
+      .rpc();
 
-      console.log("Registered! tx:", tx);
-      await fetchAll();
-    } finally {
-      setLoading(false);
-    }
-  }, [program, wallet.publicKey, connection, treasuryPubkey, resolveTreasury, fetchAll]);
+    console.log("Registered! tx:", tx);
+    await fetchAll();
+  } finally {
+    setLoading(false);
+  }
+}, [program, wallet, connection, treasuryPubkey, resolveTreasury, fetchAll]);
 
   // ── openStakePot ──────────────────────────────────────────────────────────
   const openStakePot = useCallback(async (
