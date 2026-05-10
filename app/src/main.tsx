@@ -24,8 +24,6 @@ function Root() {
   const network = WalletAdapterNetwork.Devnet;
   const endpoint = useMemo(() => clusterApiUrl(network), [network]);
 
-  // const endpoint = "http://127.0.0.1:8899";
-
   const wallets = useMemo(
     () => [
       new PhantomWalletAdapter(),
@@ -34,15 +32,6 @@ function Root() {
     ],
     [network]
   );
-
-//   const wallets = useMemo(
-//   () => [
-//     new PhantomWalletAdapter(),
-//     new SolflareWalletAdapter(),
-//     new TorusWalletAdapter(),
-//   ],
-//   []
-// );
 
   return (
     <ConnectionProvider endpoint={endpoint}>
