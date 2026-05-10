@@ -7,10 +7,8 @@ import {
   getAssociatedTokenAddress,
   createAssociatedTokenAccountInstruction,
   TOKEN_PROGRAM_ID,
-  ASSOCIATED_TOKEN_PROGRAM_ID,
 } from "@solana/spl-token";
 import {
-  Transaction,
   SystemProgram,
   SYSVAR_RENT_PUBKEY,
 } from "@solana/web3.js";
@@ -240,95 +238,6 @@ export function useHealthProgram() {
       setActivePots([]);
     }
   }, []);
-
-  // const registerPatient = useCallback(async (name: string) => {
-  //   if (!program || !wallet.publicKey || !wallet.signTransaction) 
-  //     throw new Error("Wallet not connected");
-
-  //   const [protocolPda] = PublicKey.findProgramAddressSync([PROTOCOL_SEED], PROGRAM_ID);
-  //   const [patientPda]  = PublicKey.findProgramAddressSync(
-  //     [PATIENT_SEED, wallet.publicKey.toBuffer()], PROGRAM_ID
-  //   );
-
-  //   const acc  = await (program.account as any).protocolState.fetch(protocolPda);
-  //   const mint: PublicKey = acc.healthMint;
-
-  //   const treasury = treasuryPubkey ?? await resolveTreasury(acc, mint, protocolPda);
-  //   if (!treasuryPubkey) setTreasuryPubkey(treasury);
-
-  //   const nameHash = Array.from(
-  //     new Uint8Array(
-  //       await crypto.subtle.digest("SHA-256", new TextEncoder().encode(name))
-  //     )
-  //   );
-
-  //   const patientAta = await getAssociatedTokenAddress(
-  //     mint,
-  //     wallet.publicKey,
-  //     false,
-  //     TOKEN_PROGRAM_ID,
-  //     ASSOCIATED_TOKEN_PROGRAM_ID,
-  //   );
-
-  //   // ── Step 1: create ATA if it doesn't exist ───────────────────────────────
-  //   const ataInfo = await connection.getAccountInfo(patientAta);
-  //   if (!ataInfo) {
-  //     console.log("Creating ATA:", patientAta.toBase58());
-  //     const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
-      
-  //     const createAtaTx = new Transaction({
-  //       recentBlockhash: blockhash,
-  //       feePayer: wallet.publicKey,
-  //     }).add(
-  //       createAssociatedTokenAccountInstruction(
-  //         wallet.publicKey,               // payer
-  //         patientAta,                     // ata
-  //         wallet.publicKey,               // owner
-  //         mint,                           // mint
-  //         TOKEN_PROGRAM_ID,
-  //         ASSOCIATED_TOKEN_PROGRAM_ID,
-  //       )
-  //     );
-
-  //     const signedTx = await wallet.signTransaction(createAtaTx);
-  //     const sig = await connection.sendRawTransaction(signedTx.serialize(), {
-  //       skipPreflight: false,
-  //       preflightCommitment: "confirmed",
-  //     });
-  //     await connection.confirmTransaction(
-  //       { signature: sig, blockhash, lastValidBlockHeight },
-  //       "confirmed"
-  //     );
-  //     console.log("ATA created, tx:", sig);
-  //   } else {
-  //     console.log("ATA already exists:", patientAta.toBase58());
-  //   }
-
-  //   // ── Step 2: register patient ─────────────────────────────────────────────
-  //   setLoading(true);
-  //   try {
-  //     const tx = await (program.methods as any)
-  //       .registerPatient(nameHash, new BN(500_000_000))
-  //       .accounts({
-  //         patientProfile:      patientPda,
-  //         patientTokenAccount: patientAta,
-  //         protocolState:       protocolPda,
-  //         treasury,
-  //         healthMint:          mint,
-  //         patientWallet:       wallet.publicKey,
-  //         tokenProgram:        TOKEN_PROGRAM_ID,
-  //         systemProgram:       SystemProgram.programId,
-  //         rent:                SYSVAR_RENT_PUBKEY,
-  //       })
-  //       .rpc({ commitment: "confirmed" });
-
-  //     console.log("Registered! tx:", tx);
-  //     await fetchAll();
-  //   } finally {
-  //     setLoading(false);
-  //   }
-  // }, [program, wallet, connection, treasuryPubkey, resolveTreasury, fetchAll]);
-
 
   const registerPatient = useCallback(async (name: string) => {
   if (!program || !wallet.publicKey || !wallet.signTransaction)
