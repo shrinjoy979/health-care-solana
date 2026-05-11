@@ -12,7 +12,6 @@ const G = {
   red: "#D4537E", amber: "#EF9F27", blue: "#378ADD",
   purple: "#9B6DFF",
 };
-
 const mono: React.CSSProperties = { fontFamily: "'DM Mono', monospace" };
 const short = (pk: string) => `${pk.slice(0, 4)}…${pk.slice(-4)}`;
 
