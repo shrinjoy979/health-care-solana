@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
-import { useHealthProgram } from "../hooks/useHealthProgram";
+import { useHealthProgram, TREATMENT_TYPES, type TreatmentType } from "../hooks/useHealthProgram";
 import { SPECIALIZATION_LABELS } from "../hooks/useHealthProgram";
+import { PublicKey } from "@solana/web3.js";
 
-// ─── Design tokens (same palette as patient dashboard) ────────────────────────
+// ─── Design tokens ────────────────────────────────────────────────
 const G = {
   bg: "#0a0f0d", surface: "#0f1f18", card: "#111c16",
   border: "rgba(29,158,117,0.15)", borderHover: "rgba(29,158,117,0.35)",
@@ -13,7 +14,10 @@ const G = {
   purple: "#9B6DFF",
 };
 const mono: React.CSSProperties = { fontFamily: "'DM Mono', monospace" };
-const short = (pk: string) => `${pk.slice(0, 4)}…${pk.slice(-4)}`;
+const short = (pk: string | PublicKey) => {
+  const s = typeof pk === 'string' ? pk : pk.toBase58();
+  return `${s.slice(0, 4)}…${s.slice(-4)}`;
+};
 
 // ─── Sub-components
 
@@ -77,14 +81,179 @@ function OutcomeBar({ positive, negative }: { positive: number; negative: number
   );
 }
 
-// ─── Main component ───────────────────────────────────────────────────────────
+// ─── Session Modal ────────────────────────────────────────────────
+
+function SessionModal({ 
+  pot, 
+  onClose, 
+  onSubmit 
+}: { 
+  pot: any; 
+  onClose: () => void; 
+  onSubmit: (score: number, notes: string, type: TreatmentType) => void;
+}) {
+  const [score, setScore] = useState(pot.currentHealthScore);
+  const [notes, setNotes] = useState("");
+  const [type, setType] = useState<TreatmentType>("Consultation");
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async () => {
+    setLoading(true);
+    try {
+      await onSubmit(score, notes, type);
+      onClose();
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+      <div style={{ background: G.surface, border: `1px solid ${G.border}`, borderRadius: 16, padding: 32, width: 420, maxWidth: "90%" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+          <h3 style={{ margin: 0, fontSize: 18, color: G.text }}>Record Session</h3>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: G.muted, cursor: "pointer", fontSize: 20 }}>×</button>
+        </div>
+
+        <div style={{ marginBottom: 20 }}>
+          <label style={{ display: "block", fontSize: 12, color: G.muted, marginBottom: 8 }}>New Health Score (0-100)</label>
+          <input 
+            type="number" 
+            value={score} 
+            onChange={e => setScore(Number(e.target.value))}
+            min={0} max={100}
+            style={{ width: "100%", background: G.bg, border: `1px solid ${G.border}`, borderRadius: 8, padding: 12, color: G.text, ...mono }}
+          />
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: G.faint, marginTop: 4 }}>
+            <span>Baseline: {pot.baselineHealthScore}</span>
+            <span>Current: {pot.currentHealthScore}</span>
+          </div>
+        </div>
+
+        <div style={{ marginBottom: 20 }}>
+          <label style={{ display: "block", fontSize: 12, color: G.muted, marginBottom: 8 }}>Treatment Type</label>
+          <select 
+            value={type} 
+            onChange={e => setType(e.target.value as TreatmentType)}
+            style={{ width: "100%", background: G.bg, border: `1px solid ${G.border}`, borderRadius: 8, padding: 12, color: G.text }}
+          >
+            {TREATMENT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+        </div>
+
+        <div style={{ marginBottom: 24 }}>
+          <label style={{ display: "block", fontSize: 12, color: G.muted, marginBottom: 8 }}>Session Notes (hashed on-chain)</label>
+          <textarea 
+            value={notes} 
+            onChange={e => setNotes(e.target.value)}
+            rows={3}
+            style={{ width: "100%", background: G.bg, border: `1px solid ${G.border}`, borderRadius: 8, padding: 12, color: G.text, resize: "none" }}
+            placeholder="Observations, recommendations..."
+          />
+        </div>
+
+        <div style={{ display: "flex", gap: 12 }}>
+          <button 
+            onClick={handleSubmit} 
+            disabled={loading}
+            style={{ flex: 1, background: G.green, color: G.bg, border: "none", borderRadius: 8, padding: 12, fontWeight: 600, cursor: "pointer", opacity: loading ? 0.6 : 1 }}
+          >
+            {loading ? "Recording..." : "Record Session"}
+          </button>
+          <button 
+            onClick={onClose} 
+            style={{ flex: 1, background: "transparent", color: G.muted, border: `1px solid ${G.border}`, borderRadius: 8, padding: 12, cursor: "pointer" }}
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Join Pot Modal ────────────────────────────────────────────────
+
+function JoinPotModal({ 
+  pot, 
+  onClose, 
+  onSubmit 
+}: { 
+  pot: any; 
+  onClose: () => void; 
+  onSubmit: (amount: number) => void;
+}) {
+  const [amount, setAmount] = useState(100);
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async () => {
+    setLoading(true);
+    try {
+      await onSubmit(amount);
+      onClose();
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+      <div style={{ background: G.surface, border: `1px solid ${G.amber}`, borderRadius: 16, padding: 32, width: 400, maxWidth: "90%" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+          <h3 style={{ margin: 0, fontSize: 18, color: G.text }}>Join Stake Pot</h3>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: G.muted, cursor: "pointer", fontSize: 20 }}>×</button>
+        </div>
+
+        <p style={{ color: G.muted, fontSize: 14, marginBottom: 20 }}>
+          Patient <strong>{short(pot.patient)}</strong> has invited you to join this pot. 
+          Stake your tokens to begin treatment.
+        </p>
+
+        <div style={{ marginBottom: 24 }}>
+          <label style={{ display: "block", fontSize: 12, color: G.muted, marginBottom: 8 }}>Your Stake ($HEALTH)</label>
+          <input 
+            type="number" 
+            value={amount} 
+            onChange={e => setAmount(Number(e.target.value))}
+            min={100}
+            style={{ width: "100%", background: G.bg, border: `1px solid ${G.border}`, borderRadius: 8, padding: 12, color: G.text, ...mono }}
+          />
+        </div>
+
+        <div style={{ display: "flex", gap: 12 }}>
+          <button 
+            onClick={handleSubmit} 
+            disabled={loading}
+            style={{ flex: 1, background: G.amber, color: G.bg, border: "none", borderRadius: 8, padding: 12, fontWeight: 600, cursor: "pointer", opacity: loading ? 0.6 : 1 }}
+          >
+            {loading ? "Staking..." : "Stake & Join"}
+          </button>
+          <button 
+            onClick={onClose} 
+            style={{ flex: 1, background: "transparent", color: G.muted, border: `1px solid ${G.border}`, borderRadius: 8, padding: 12, cursor: "pointer" }}
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Main Component ───────────────────────────────────────────────
 
 export default function DoctorDashboard() {
   const { publicKey, disconnect } = useWallet();
-  const { practitionerProfile, activePots, protocolState, healthBalance, loading, error, refetch } = useHealthProgram();
+  const { practitionerProfile, activePots, protocolState, healthBalance, loading, error, refetch, recordSession, joinPot } = useHealthProgram();
 
   const [activeTab, setActiveTab] = useState("overview");
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sessionModalPot, setSessionModalPot] = useState<any>(null);
+  const [joinPotModal, setJoinPotModal] = useState<any>(null);
 
   const profile     = practitionerProfile;
   const myPots      = activePots.filter(p => p.practitioner.toBase58() === publicKey?.toBase58());
@@ -100,6 +269,14 @@ export default function DoctorDashboard() {
   const specialLabel = profile?.specialization
     ? (SPECIALIZATION_LABELS as any)[profile.specialization] ?? profile.specialization
     : "—";
+
+  const handleRecordSession = async (potPk: PublicKey, score: number, notes: string, type: TreatmentType) => {
+    await recordSession(potPk, score, notes, type);
+  };
+
+  const handleJoinPot = async (potPk: PublicKey, amount: number) => {
+    await joinPot(potPk, amount);
+  };
 
   return (
     <div style={{ display: "flex", height: "100vh", background: G.bg, color: G.text, fontFamily: "'Outfit', sans-serif", overflow: "hidden" }}>
@@ -328,6 +505,27 @@ export default function DoctorDashboard() {
                       <span>Patient {(pot.patientShareBps / 100).toFixed(0)}%</span>
                       <span>You {(pot.practitionerShareBps / 100).toFixed(0)}%</span>
                     </div>
+
+                    {/* Dynamic Action Buttons */}
+                    {pot.status === "active" && (
+                      <div style={{ marginTop: 20, display: "flex", justifyContent: "flex-end", gap: 10 }}>
+                        {pot.practitionerStaked === 0 ? (
+                          <button
+                            onClick={() => setJoinPotModal(pot)}
+                            style={{ background: G.amber, color: G.bg, border: "none", borderRadius: 8, padding: "10px 20px", fontWeight: 500, cursor: "pointer", ...mono, fontSize: 12 }}
+                          >
+                            Join Pot & Stake
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => setSessionModalPot(pot)}
+                            style={{ background: G.blue, color: "#fff", border: "none", borderRadius: 8, padding: "10px 20px", fontWeight: 500, cursor: "pointer", ...mono, fontSize: 12 }}
+                          >
+                            Record Session
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -442,6 +640,23 @@ export default function DoctorDashboard() {
           )}
         </div>
       </main>
+
+      {/* Modals */}
+      {sessionModalPot && (
+        <SessionModal 
+          pot={sessionModalPot} 
+          onClose={() => setSessionModalPot(null)} 
+          onSubmit={(score, notes, type) => handleRecordSession(sessionModalPot.publicKey, score, notes, type)}
+        />
+      )}
+      
+      {joinPotModal && (
+        <JoinPotModal 
+          pot={joinPotModal} 
+          onClose={() => setJoinPotModal(null)} 
+          onSubmit={(amount) => handleJoinPot(joinPotModal.publicKey, amount)}
+        />
+      )}
     </div>
   );
 }

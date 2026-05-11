@@ -1,20 +1,20 @@
 import { useEffect, useState, useCallback } from "react";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { Program, AnchorProvider, BN } from "@coral-xyz/anchor";
-import { PublicKey } from "@solana/web3.js";
+import { PublicKey, SystemProgram, SYSVAR_RENT_PUBKEY, Keypair } from "@solana/web3.js";
 import idl from "../idl.json";
 import {
   getAssociatedTokenAddress,
   createAssociatedTokenAccountInstruction,
   TOKEN_PROGRAM_ID,
 } from "@solana/spl-token";
-import { SystemProgram, SYSVAR_RENT_PUBKEY } from "@solana/web3.js";
 
 const PROGRAM_ID         = new PublicKey("B3hcYp5nnHH8iWXoEsF2UJpNy82fi7thTHeKJBoNq4pa");
 const PATIENT_SEED       = Buffer.from("patient");
 const PRACTITIONER_SEED  = Buffer.from("practitioner");
 const PROTOCOL_SEED      = Buffer.from("protocol");
 const POT_SEED           = Buffer.from("stake_pot");
+const SESSION_SEED       = Buffer.from("session");
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -97,6 +97,20 @@ export const SPECIALIZATION_LABELS: Record<Specialization, string> = {
   Other:        "Other",
 };
 
+// ─── Treatment Types ───────────────────────────────────────────────────────────
+
+export const TREATMENT_TYPES = [
+  "Consultation",
+  "Prescription",
+  "Procedure",
+  "LifestyleChange",
+  "Rehabilitation",
+  "Monitoring",
+  "Other",
+] as const;
+
+export type TreatmentType = typeof TREATMENT_TYPES[number];
+
 // ─── Hook ─────────────────────────────────────────────────────────────────────
 
 export function useHealthProgram() {
@@ -119,6 +133,7 @@ export function useHealthProgram() {
     if (!wallet.publicKey || !wallet.signTransaction) return;
     setPatientProfile(undefined);
     setPractitionerProfile(undefined);
+    setActivePots([]); // Reset pots on wallet change
     try {
       const provider = new AnchorProvider(connection, wallet as any, {
         commitment: "confirmed",
@@ -144,10 +159,23 @@ export function useHealthProgram() {
     try {
       const mint = await fetchProtocolState(program);
       if (mint && wallet.publicKey) await fetchTokenBalance(mint, wallet.publicKey);
-      await Promise.all([
+      
+      // Fetch profiles first to determine roles
+      const [patProfile, pracProfile] = await Promise.all([
         fetchPatientProfile(program),
         fetchPractitionerProfile(program),
       ]);
+
+      // Fetch pots based on detected roles to avoid race conditions
+      const potPromises = [];
+      if (patProfile) {
+        potPromises.push(fetchActivePots(program, wallet.publicKey));
+      }
+      if (pracProfile) {
+        potPromises.push(fetchPractitionerPots(program, wallet.publicKey));
+      }
+      await Promise.all(potPromises);
+
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -215,15 +243,16 @@ export function useHealthProgram() {
   }, [connection]);
 
   // ── Fetch patient profile ─────────────────────────────────────────────────
+  // Returns the profile or null
 
-  const fetchPatientProfile = useCallback(async (prog: Program) => {
-    if (!wallet.publicKey) return;
+  const fetchPatientProfile = useCallback(async (prog: Program): Promise<PatientProfile | null> => {
+    if (!wallet.publicKey) return null;
     try {
       const [pda] = PublicKey.findProgramAddressSync(
         [PATIENT_SEED, wallet.publicKey.toBuffer()], PROGRAM_ID
       );
       const acc = await (prog.account as any).patientProfile.fetch(pda);
-      setPatientProfile({
+      const profile = {
         wallet:        acc.wallet,
         healthScore:   acc.healthScore,
         baselineScore: acc.baselineScore,
@@ -232,23 +261,26 @@ export function useHealthProgram() {
         activePots:    acc.activePots,
         sessionCount:  acc.sessionCount,
         registeredAt:  new BN(acc.registeredAt).toNumber(),
-      });
-      await fetchActivePots(prog, wallet.publicKey);
+      };
+      setPatientProfile(profile);
+      return profile;
     } catch {
       setPatientProfile(null);
+      return null;
     }
   }, [wallet.publicKey]);
 
   // ── Fetch practitioner profile ────────────────────────────────────────────
+  // Returns the profile or null
 
-  const fetchPractitionerProfile = useCallback(async (prog: Program) => {
-    if (!wallet.publicKey) return;
+  const fetchPractitionerProfile = useCallback(async (prog: Program): Promise<PractitionerProfile | null> => {
+    if (!wallet.publicKey) return null;
     try {
       const [pda] = PublicKey.findProgramAddressSync(
         [PRACTITIONER_SEED, wallet.publicKey.toBuffer()], PROGRAM_ID
       );
       const acc = await (prog.account as any).practitionerProfile.fetch(pda);
-      setPractitionerProfile({
+      const profile = {
         wallet:             acc.wallet,
         specialization:     Object.keys(acc.specialization)[0],
         reputationScore:    acc.reputationScore,
@@ -260,10 +292,12 @@ export function useHealthProgram() {
         positiveOutcomes:   acc.positiveOutcomes,
         negativeOutcomes:   acc.negativeOutcomes,
         registeredAt:       new BN(acc.registeredAt).toNumber(),
-      });
-      await fetchPractitionerPots(prog, wallet.publicKey);
+      };
+      setPractitionerProfile(profile);
+      return profile;
     } catch {
       setPractitionerProfile(null);
+      return null;
     }
   }, [wallet.publicKey]);
 
@@ -274,59 +308,57 @@ export function useHealthProgram() {
       const allPots = await (prog.account as any).stakePot.all([
         { memcmp: { offset: 8, bytes: walletPubkey.toBase58() } },
       ]);
-      setActivePots(allPots.map((p: any) => ({
-        publicKey:            p.publicKey,
-        patient:              p.account.patient,
-        practitioner:         p.account.practitioner,
-        patientStaked:        new BN(p.account.patientStaked).toNumber()      / 1_000_000,
-        practitionerStaked:   new BN(p.account.practitionerStaked).toNumber() / 1_000_000,
-        totalAmount:          new BN(p.account.totalAmount).toNumber()         / 1_000_000,
-        patientShareBps:      p.account.patientShareBps,
-        practitionerShareBps: p.account.practitionerShareBps,
-        baselineHealthScore:  p.account.baselineHealthScore,
-        currentHealthScore:   p.account.currentHealthScore,
-        sessionCount:         p.account.sessionCount,
-        status:               Object.keys(p.account.status)[0],
-        expiresAt:            new BN(p.account.expiresAt).toNumber(),
-      })));
+      
+      const parsedPots = allPots.map((p: any) => mapPotAccount(p));
+
+      setActivePots(prev => {
+        const existingKeys = new Set(prev.map(p => p.publicKey.toBase58()));
+        const newPots = parsedPots.filter((p: StakePot) => !existingKeys.has(p.publicKey.toBase58()));
+        return [...prev, ...newPots];
+      });
+
     } catch {
-      setActivePots([]);
+      // silent fail
     }
   }, []);
 
-  // ── Fetch practitioner pots (practitioner pubkey is at offset 8+32=40) ───
+  // ── Fetch practitioner pots ──────────────────────────────────────────────
 
   const fetchPractitionerPots = useCallback(async (prog: Program, walletPubkey: PublicKey) => {
     try {
       const allPots = await (prog.account as any).stakePot.all([
         { memcmp: { offset: 8 + 32, bytes: walletPubkey.toBase58() } },
       ]);
-      // Merge with existing activePots (don't overwrite patient pots)
+
+      const parsedPots = allPots.map((p: any) => mapPotAccount(p));
+
       setActivePots(prev => {
         const existingKeys = new Set(prev.map(p => p.publicKey.toBase58()));
-        const newPots = allPots
-          .filter((p: any) => !existingKeys.has(p.publicKey.toBase58()))
-          .map((p: any) => ({
-            publicKey:            p.publicKey,
-            patient:              p.account.patient,
-            practitioner:         p.account.practitioner,
-            patientStaked:        new BN(p.account.patientStaked).toNumber()      / 1_000_000,
-            practitionerStaked:   new BN(p.account.practitionerStaked).toNumber() / 1_000_000,
-            totalAmount:          new BN(p.account.totalAmount).toNumber()         / 1_000_000,
-            patientShareBps:      p.account.patientShareBps,
-            practitionerShareBps: p.account.practitionerShareBps,
-            baselineHealthScore:  p.account.baselineHealthScore,
-            currentHealthScore:   p.account.currentHealthScore,
-            sessionCount:         p.account.sessionCount,
-            status:               Object.keys(p.account.status)[0],
-            expiresAt:            new BN(p.account.expiresAt).toNumber(),
-          }));
+        const newPots = parsedPots.filter((p: StakePot) => !existingKeys.has(p.publicKey.toBase58()));
         return [...prev, ...newPots];
       });
     } catch {
-      // silently ignore
+      // silent fail
     }
   }, []);
+
+  // ─── Helper to map pot account ───────────────────────────────────────────
+
+  const mapPotAccount = (p: any): StakePot => ({
+    publicKey:            p.publicKey,
+    patient:              p.account.patient,
+    practitioner:         p.account.practitioner,
+    patientStaked:        new BN(p.account.patientStaked).toNumber()      / 1_000_000,
+    practitionerStaked:   new BN(p.account.practitionerStaked).toNumber() / 1_000_000,
+    totalAmount:          new BN(p.account.totalAmount).toNumber()         / 1_000_000,
+    patientShareBps:      p.account.patientShareBps,
+    practitionerShareBps: p.account.practitionerShareBps,
+    baselineHealthScore:  p.account.baselineHealthScore,
+    currentHealthScore:   p.account.currentHealthScore,
+    sessionCount:         p.account.sessionCount,
+    status:               Object.keys(p.account.status)[0],
+    expiresAt:            new BN(p.account.expiresAt).toNumber(),
+  });
 
   // ── Register patient ──────────────────────────────────────────────────────
 
@@ -412,8 +444,18 @@ export function useHealthProgram() {
       createAssociatedTokenAccountInstruction(wallet.publicKey, pracAta, wallet.publicKey, mint),
     ];
 
-    // Build the enum variant object expected by Anchor
-    const specializationArg = { [specialization.charAt(0).toLowerCase() + specialization.slice(1)]: {} };
+    const specializationMap: Record<Specialization, any> = {
+      PrimaryCare: { primaryCare: {} },
+      Cardiology: { cardiology: {} },
+      Nutrition: { nutrition: {} },
+      MentalHealth: { mentalHealth: {} },
+      Oncology: { oncology: {} },
+      Orthopedics: { orthopedics: {} },
+      Dermatology: { dermatology: {} },
+      Other: { other: {} },
+    };
+
+    const specializationArg = specializationMap[specialization];
 
     setLoading(true);
     try {
@@ -442,10 +484,11 @@ export function useHealthProgram() {
 
   // ── Open stake pot ────────────────────────────────────────────────────────
 
+  // ── Open stake pot (Patient Side) ────────────────────────────────────────
   const openStakePot = useCallback(async (
     practitionerWallet: PublicKey,
     patientStake: number,
-    practitionerStake: number,
+    // REMOVED: practitionerStake - Doctor joins later
     durationDays: number,
   ) => {
     if (!program || !wallet.publicKey) throw new Error("Wallet not connected");
@@ -455,40 +498,167 @@ export function useHealthProgram() {
       const [patientPda]  = PublicKey.findProgramAddressSync(
         [PATIENT_SEED, wallet.publicKey.toBuffer()], PROGRAM_ID
       );
-      const [pracPda] = PublicKey.findProgramAddressSync(
-        [PRACTITIONER_SEED, practitionerWallet.toBuffer()], PROGRAM_ID
-      );
+      
+      // 1. Derive the Pot PDA
       const [potPda] = PublicKey.findProgramAddressSync(
         [POT_SEED, wallet.publicKey.toBuffer(), practitionerWallet.toBuffer()], PROGRAM_ID
       );
 
+      // 2. Get Mint and Patient ATA
       const acc  = await (program.account as any).protocolState.fetch(protocolPda);
       const mint: PublicKey = acc.healthMint;
-
       const patientAta = await getAssociatedTokenAddress(mint, wallet.publicKey);
-      const pracAta    = await getAssociatedTokenAddress(mint, practitionerWallet);
 
+      // 3. GENERATE KEYPAIR FOR VAULT
+      // Because the Rust struct has `init` for pot_vault without `seeds`, it requires a client-side Keypair
+      const vaultKeypair = Keypair.generate();
+
+      // 4. Send Transaction
       const tx = await (program.methods as any)
         .openStakePot(
-          new BN(patientStake      * 1_000_000),
-          new BN(practitionerStake * 1_000_000),
-          durationDays,
+          new BN(patientStake * 1_000_000), // Arg 1: patient_stake
+          durationDays                      // Arg 2: treatment_duration_days
+          // Arg 3 removed
         )
         .accounts({
           stakePot:                 potPda,
+          potVault:                 vaultKeypair.publicKey, // The generated keypair pubkey
           patientProfile:           patientPda,
-          practitionerProfile:      pracPda,
           patientTokenAccount:      patientAta,
-          practitionerTokenAccount: pracAta,
           protocolState:            protocolPda,
           healthMint:               mint,
           patientWallet:            wallet.publicKey,
-          practitionerWallet,
+          practitionerWallet,       // Just a public key input, not a signer
+          tokenProgram:             TOKEN_PROGRAM_ID,
+          systemProgram:            SystemProgram.programId,
+          rent:                     SYSVAR_RENT_PUBKEY,
         })
+        .signers([vaultKeypair]) // Must sign with the keypair
         .rpc();
 
       console.log("Stake pot opened:", tx);
       await fetchAll();
+    } catch (e) {
+      console.error(e);
+      throw e;
+    } finally {
+      setLoading(false);
+    }
+  }, [program, wallet.publicKey, fetchAll]);
+
+  // ── NEW: Join Pot (Practitioner Side) ────────────────────────────────────
+  const joinPot = useCallback(async (
+    potPublicKey: PublicKey,
+    practitionerStake: number
+  ) => {
+    if (!program || !wallet.publicKey) throw new Error("Wallet not connected");
+    setLoading(true);
+    try {
+      const potAcc = await (program.account as any).stakePot.fetch(potPublicKey);
+      const mint = potAcc.healthMint; // Need to fetch mint, or from protocol state
+
+      const [protocolPda] = PublicKey.findProgramAddressSync([PROTOCOL_SEED], PROGRAM_ID);
+      const protocolAcc = await (program.account as any).protocolState.fetch(protocolPda);
+      const actualMint = protocolAcc.healthMint;
+
+      const practitionerAta = await getAssociatedTokenAddress(actualMint, wallet.publicKey);
+      const [pracPda] = PublicKey.findProgramAddressSync(
+        [PRACTITIONER_SEED, wallet.publicKey.toBuffer()], PROGRAM_ID
+      );
+
+      const tx = await (program.methods as any)
+        .joinPot(new BN(practitionerStake * 1_000_000))
+        .accounts({
+          stakePot: potPublicKey,
+          practitionerProfile: pracPda,
+          practitionerTokenAccount: practitionerAta,
+          potVault: potAcc.potVault, // Ensure your program exposes this or derive it
+          practitionerWallet: wallet.publicKey,
+        })
+        .rpc();
+
+      console.log("Joined pot:", tx);
+      await fetchAll();
+    } catch (e) {
+      console.error(e);
+      throw e;
+    } finally {
+      setLoading(false);
+    }
+  }, [program, wallet.publicKey, fetchAll]);
+
+  // ── Record Session ────────────────────────────────────────────────────────
+
+  const recordSession = useCallback(async (
+    potPublicKey: PublicKey,
+    newHealthScore: number,
+    notes: string,
+    treatmentType: TreatmentType
+  ) => {
+    if (!program || !wallet.publicKey) throw new Error("Wallet not connected");
+    setLoading(true);
+    try {
+      // Fetch pot to get session count for PDA
+      const potAcc = await (program.account as any).stakePot.fetch(potPublicKey);
+      const sessionCount = potAcc.sessionCount;
+
+      // Derive PDAs
+      const [sessionPda] = PublicKey.findProgramAddressSync(
+        [
+          SESSION_SEED,
+          potPublicKey.toBuffer(),
+          Buffer.from([sessionCount])
+        ],
+        PROGRAM_ID
+      );
+
+      const [patientPda] = PublicKey.findProgramAddressSync(
+        [PATIENT_SEED, potAcc.patient.toBuffer()], PROGRAM_ID
+      );
+      
+      const [pracPda] = PublicKey.findProgramAddressSync(
+        [PRACTITIONER_SEED, wallet.publicKey.toBuffer()], PROGRAM_ID
+      );
+
+      const [protocolPda] = PublicKey.findProgramAddressSync([PROTOCOL_SEED], PROGRAM_ID);
+
+      // Hash notes
+      const notesHash = Array.from(
+        new Uint8Array(
+          await crypto.subtle.digest("SHA-256", new TextEncoder().encode(notes))
+        )
+      );
+
+      // Map treatment type
+      const treatmentMap: Record<TreatmentType, any> = {
+        Consultation: { consultation: {} },
+        Prescription: { prescription: {} },
+        Procedure: { procedure: {} },
+        LifestyleChange: { lifestyleChange: {} },
+        Rehabilitation: { rehabilitation: {} },
+        Monitoring: { monitoring: {} },
+        Other: { other: {} },
+      };
+
+      const tx = await (program.methods as any)
+        .recordSession(newHealthScore, notesHash, treatmentMap[treatmentType])
+        .accounts({
+          sessionRecord:       sessionPda,
+          stakePot:            potPublicKey,
+          patientProfile:      patientPda,
+          practitionerProfile: pracPda,
+          protocolState:       protocolPda,
+          practitionerWallet:  wallet.publicKey,
+          systemProgram:       SystemProgram.programId,
+          rent:                SYSVAR_RENT_PUBKEY,
+        })
+        .rpc({ commitment: "confirmed" });
+
+      console.log("Session recorded:", tx);
+      await fetchAll();
+    } catch (e) {
+      console.error(e);
+      throw e;
     } finally {
       setLoading(false);
     }
@@ -497,7 +667,7 @@ export function useHealthProgram() {
   // ── Derived role ──────────────────────────────────────────────────────────
 
   const userRole: UserRole = (() => {
-    if (patientProfile === undefined || practitionerProfile === undefined) return null; // still loading
+    if (patientProfile === undefined || practitionerProfile === undefined) return null;
     const isPatient       = patientProfile !== null;
     const isPractitioner  = practitionerProfile !== null;
     if (isPatient && isPractitioner) return "both";
@@ -521,6 +691,8 @@ export function useHealthProgram() {
     registerPatient,
     registerPractitioner,
     openStakePot,
+    joinPot,
+    recordSession, // Expose new function
     refetch: fetchAll,
   };
 }
