@@ -132,7 +132,7 @@ function PractitionerRegister({
   );
 }
 
-// ── Root ────────────────────────────────────────────────────────────────────
+// ── Root
 export default function App() {
   const { connected } = useWallet();
   const { userRole, registerPatient, registerPractitioner, loading, error } = useHealthProgram();

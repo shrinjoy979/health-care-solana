@@ -15,7 +15,7 @@ const G = {
 const mono: React.CSSProperties = { fontFamily: "'DM Mono', monospace" };
 const short = (pk: string) => `${pk.slice(0, 4)}…${pk.slice(-4)}`;
 
-// ─── Sub-components ───────────────────────────────────────────────────────────
+// ─── Sub-components
 
 function MetricCard({ label, value, sub, color = G.greenLight }: {
   label: string; value: string; sub?: string; color?: string;
