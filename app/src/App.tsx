@@ -2,9 +2,9 @@ import { useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useHealthProgram, SPECIALIZATIONS, type Specialization } from "./hooks/useHealthProgram";
 import LandingPage from "./components/LandingPage";
-import Dashboard from "./components/Dashboard";
+import PatientDashboard from "./components/PatientDashboard";
 import RoleSelect from "./components/RoleSelect";
-import PractitionerDashboard from "./components/PractitionerDashboard";
+import DoctorDashboard from "./components/DoctorDashboard";
 import "./App.css";
 
 type Role = "patient" | "practitioner";
@@ -147,9 +147,9 @@ export default function App() {
   if (userRole === null) return <FullPageSpinner />;
 
   // 3. Already registered → correct dashboard immediately
-  if (userRole === "patient")      return <Dashboard />;
-  if (userRole === "practitioner") return <PractitionerDashboard />;
-  if (userRole === "both")         return <Dashboard />; // default; add role-switcher later
+  if (userRole === "patient")      return <PatientDashboard />;
+  if (userRole === "practitioner") return <DoctorDashboard />;
+  if (userRole === "both")         return <PatientDashboard />; // default; add role-switcher later
 
   // 4. Not registered → two-step flow: pick role → fill form
   if (!pendingRole) {

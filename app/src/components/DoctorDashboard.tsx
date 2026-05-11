@@ -79,7 +79,7 @@ function OutcomeBar({ positive, negative }: { positive: number; negative: number
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export default function PractitionerDashboard() {
+export default function DoctorDashboard() {
   const { publicKey, disconnect } = useWallet();
   const { practitionerProfile, activePots, protocolState, healthBalance, loading, error, refetch } = useHealthProgram();
 

@@ -42,7 +42,7 @@ function Spinner() {
   );
 }
 
-export default function Dashboard() {
+export default function PatientDashboard() {
   const { publicKey, disconnect } = useWallet();
   const { patientProfile, activePots, protocolState, healthBalance, loading, error, refetch } = useHealthProgram();
   const [activeTab, setActiveTab] = useState("overview");
