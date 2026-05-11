@@ -3,8 +3,8 @@ import { useWallet } from "@solana/wallet-adapter-react";
 import { useHealthProgram, SPECIALIZATIONS, type Specialization } from "./hooks/useHealthProgram";
 import LandingPage from "./components/LandingPage";
 import Dashboard from "./components/Dashboard";
-import PractitionerDashboard from "./components/PractitionerDashboard";
 import RoleSelect from "./components/RoleSelect";
+import PractitionerDashboard from "./components/PractitionerDashboard";
 import "./App.css";
 
 type Role = "patient" | "practitioner";
@@ -132,7 +132,7 @@ function PractitionerRegister({
   );
 }
 
-// ── Root ────────────────────────────────────────────────────────────────────
+// ── Root
 export default function App() {
   const { connected } = useWallet();
   const { userRole, registerPatient, registerPractitioner, loading, error } = useHealthProgram();
