@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useHealthProgram } from "../hooks/useHealthProgram";
+import { PublicKey } from "@solana/web3.js";
 
 const G = {
   bg: "#0a0f0d", surface: "#0f1f18", card: "#111c16",
@@ -11,7 +12,10 @@ const G = {
 };
 
 const mono: React.CSSProperties = { fontFamily: "'DM Mono', monospace" };
-const short = (pk: string) => `${pk.slice(0, 4)}…${pk.slice(-4)}`;
+const short = (pk: string | PublicKey) => {
+  const s = typeof pk === 'string' ? pk : pk.toBase58();
+  return `${s.slice(0, 4)}…${s.slice(-4)}`;
+};
 
 function MetricCard({ label, value, sub, color = G.greenLight }: {
   label: string; value: string; sub?: string; color?: string;
@@ -42,11 +46,94 @@ function Spinner() {
   );
 }
 
+// ─── Open Pot Modal (Updated: Removed Practitioner Stake) ────────────────────────────────────────────────
+
+function OpenPotModal({ 
+  onClose, 
+  onSubmit 
+}: { 
+  onClose: () => void; 
+  onSubmit: (practitioner: string, patientStake: number, days: number) => void; // Removed pracStake
+}) {
+  const [practitioner, setPractitioner] = useState("");
+  const [patientStake, setPatientStake] = useState(100);
+  // Removed pracStake state
+  const [days, setDays] = useState(30);
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async () => {
+    if (!practitioner) return;
+    setLoading(true);
+    try {
+      await onSubmit(practitioner, patientStake, days); // Sending 3 args
+      onClose();
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+      <div style={{ background: G.surface, border: `1px solid ${G.border}`, borderRadius: 16, padding: 32, width: 440, maxWidth: "90%" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+          <h3 style={{ margin: 0, fontSize: 18, color: G.text }}>Open Stake Pot</h3>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: G.muted, cursor: "pointer", fontSize: 20 }}>×</button>
+        </div>
+
+        <div style={{ marginBottom: 16 }}>
+          <label style={{ display: "block", fontSize: 12, color: G.muted, marginBottom: 8 }}>Practitioner Address</label>
+          <input 
+            value={practitioner} 
+            onChange={e => setPractitioner(e.target.value)}
+            placeholder="Solana wallet address"
+            style={{ width: "100%", background: G.bg, border: `1px solid ${G.border}`, borderRadius: 8, padding: 12, color: G.text, ...mono, fontSize: 12 }}
+          />
+        </div>
+
+        <div style={{ marginBottom: 16 }}>
+          <label style={{ display: "block", fontSize: 12, color: G.muted, marginBottom: 8 }}>Your Stake ($H)</label>
+          <input 
+            type="number" 
+            value={patientStake} 
+            onChange={e => setPatientStake(Number(e.target.value))}
+            style={{ width: "100%", background: G.bg, border: `1px solid ${G.border}`, borderRadius: 8, padding: 12, color: G.text }}
+          />
+        </div>
+
+        {/* Removed Practitioner Stake Input */}
+
+        <div style={{ marginBottom: 24 }}>
+          <label style={{ display: "block", fontSize: 12, color: G.muted, marginBottom: 8 }}>Duration (Days)</label>
+          <input 
+            type="number" 
+            value={days} 
+            onChange={e => setDays(Number(e.target.value))}
+            style={{ width: "100%", background: G.bg, border: `1px solid ${G.border}`, borderRadius: 8, padding: 12, color: G.text }}
+          />
+        </div>
+
+        <button 
+          onClick={handleSubmit} 
+          disabled={loading || !practitioner}
+          style={{ width: "100%", background: G.green, color: G.bg, border: "none", borderRadius: 8, padding: 14, fontWeight: 600, cursor: "pointer", opacity: loading ? 0.6 : 1 }}
+        >
+          {loading ? "Opening Pot..." : "Open Pot & Stake"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Main Component ────────────────────────────────────────────────
+
 export default function PatientDashboard() {
   const { publicKey, disconnect } = useWallet();
-  const { patientProfile, activePots, protocolState, healthBalance, loading, error, refetch } = useHealthProgram();
+  const { patientProfile, activePots, protocolState, healthBalance, loading, error, refetch, openStakePot } = useHealthProgram();
   const [activeTab, setActiveTab] = useState("overview");
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [showOpenPot, setShowOpenPot] = useState(false);
 
   const healthScore = patientProfile?.healthScore ?? 0;
   const totalStaked = activePots.reduce((s, p) => s + p.totalAmount, 0);
@@ -55,6 +142,15 @@ export default function PatientDashboard() {
   const scoreChange = patientProfile
     ? patientProfile.healthScore - patientProfile.baselineScore
     : 0;
+
+  // Updated: Removed pracStake argument
+  const handleOpenPot = async (practitioner: string, pStake: number, days: number) => {
+    try {
+      await openStakePot(new PublicKey(practitioner), pStake, days);
+    } catch (e) {
+      console.error(e);
+    }
+  };
 
   return (
     <div style={{ display: "flex", height: "100vh", background: G.bg, color: G.text, fontFamily: "'Outfit', sans-serif", overflow: "hidden" }}>
@@ -138,6 +234,12 @@ export default function PatientDashboard() {
             <div style={{ fontSize: 15, fontWeight: 500, textTransform: "capitalize" }}>{activeTab}</div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            <button 
+              onClick={() => setShowOpenPot(true)}
+              style={{ background: G.green, color: G.bg, border: "none", borderRadius: 6, padding: "8px 16px", fontWeight: 500, fontSize: 12, cursor: "pointer" }}
+            >
+              + Open New Pot
+            </button>
             <div style={{ ...mono, fontSize: 12, color: G.greenLight, background: "rgba(29,158,117,0.1)", padding: "5px 12px", borderRadius: 999, border: `0.5px solid rgba(29,158,117,0.25)` }}>
               ◆ Devnet
             </div>
@@ -227,7 +329,13 @@ export default function PatientDashboard() {
                 <div style={{ background: G.card, border: `0.5px solid ${G.border}`, borderRadius: 14, padding: "48px", textAlign: "center" }}>
                   <div style={{ fontSize: 32, marginBottom: 16 }}>⬡</div>
                   <div style={{ fontSize: 15, color: G.muted }}>No stake pots yet</div>
-                  <div style={{ fontSize: 13, color: G.faint, marginTop: 8 }}>Open a pot with a practitioner to begin treatment</div>
+                  <div style={{ fontSize: 13, color: G.faint, marginTop: 8, marginBottom: 20 }}>Open a pot with a practitioner to begin treatment</div>
+                  <button 
+                    onClick={() => setShowOpenPot(true)}
+                    style={{ background: G.green, color: G.bg, border: "none", borderRadius: 8, padding: "10px 20px", fontWeight: 500, cursor: "pointer" }}
+                  >
+                    Open First Pot
+                  </button>
                 </div>
               ) : activePots.map((pot, i) => {
                 const improved = pot.currentHealthScore >= pot.baselineHealthScore;
@@ -331,6 +439,14 @@ export default function PatientDashboard() {
           )}
         </div>
       </main>
+
+      {/* Open Pot Modal */}
+      {showOpenPot && (
+        <OpenPotModal 
+          onClose={() => setShowOpenPot(false)} 
+          onSubmit={handleOpenPot}
+        />
+      )}
     </div>
   );
 }

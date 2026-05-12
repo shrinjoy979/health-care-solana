@@ -9,9 +9,6 @@
   "instructions": [
     {
       "name": "initialize_protocol",
-      "docs": [
-        "Initialize the global protocol state and $HEALTH token mint"
-      ],
       "discriminator": [
         188,
         233,
@@ -80,10 +77,106 @@
       ]
     },
     {
-      "name": "open_stake_pot",
-      "docs": [
-        "Open a new stake pot between patient and practitioner"
+      "name": "join_pot",
+      "discriminator": [
+        249,
+        78,
+        206,
+        230,
+        11,
+        66,
+        198,
+        165
       ],
+      "accounts": [
+        {
+          "name": "stake_pot",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  107,
+                  101,
+                  95,
+                  112,
+                  111,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "stake_pot.patient",
+                "account": "StakePot"
+              },
+              {
+                "kind": "account",
+                "path": "stake_pot.practitioner",
+                "account": "StakePot"
+              }
+            ]
+          }
+        },
+        {
+          "name": "pot_vault",
+          "writable": true
+        },
+        {
+          "name": "practitioner_profile",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  97,
+                  99,
+                  116,
+                  105,
+                  116,
+                  105,
+                  111,
+                  110,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "practitioner_wallet"
+              }
+            ]
+          }
+        },
+        {
+          "name": "practitioner_token_account",
+          "writable": true
+        },
+        {
+          "name": "practitioner_wallet",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": [
+        {
+          "name": "practitioner_stake",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "open_stake_pot",
       "discriminator": [
         152,
         144,
@@ -155,40 +248,7 @@
           }
         },
         {
-          "name": "practitioner_profile",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  112,
-                  114,
-                  97,
-                  99,
-                  116,
-                  105,
-                  116,
-                  105,
-                  111,
-                  110,
-                  101,
-                  114
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "practitioner_wallet"
-              }
-            ]
-          }
-        },
-        {
           "name": "patient_token_account",
-          "writable": true
-        },
-        {
-          "name": "practitioner_token_account",
           "writable": true
         },
         {
@@ -222,8 +282,10 @@
         },
         {
           "name": "practitioner_wallet",
-          "writable": true,
-          "signer": true
+          "docs": [
+            "They do not sign this transaction."
+          ],
+          "writable": true
         },
         {
           "name": "token_program",
@@ -244,10 +306,6 @@
           "type": "u64"
         },
         {
-          "name": "practitioner_stake",
-          "type": "u64"
-        },
-        {
           "name": "treatment_duration_days",
           "type": "u16"
         }
@@ -255,9 +313,6 @@
     },
     {
       "name": "oracle_update_health",
-      "docs": [
-        "Trusted oracle updates a patient's verified health score"
-      ],
       "discriminator": [
         247,
         155,
@@ -337,9 +392,6 @@
     },
     {
       "name": "raise_dispute",
-      "docs": [
-        "Patient raises a dispute — oracle reviews and may slash practitioner"
-      ],
       "discriminator": [
         41,
         243,
@@ -401,9 +453,6 @@
     },
     {
       "name": "record_session",
-      "docs": [
-        "Record a treatment session and update health score"
-      ],
       "discriminator": [
         101,
         213,
@@ -565,9 +614,6 @@
     },
     {
       "name": "register_patient",
-      "docs": [
-        "Register a new patient and airdrop onboarding tokens"
-      ],
       "discriminator": [
         28,
         119,
@@ -761,9 +807,6 @@
     },
     {
       "name": "register_practitioner",
-      "docs": [
-        "Register a practitioner with specialization and staking capability"
-      ],
       "discriminator": [
         166,
         46,
@@ -970,9 +1013,6 @@
     },
     {
       "name": "resolve_dispute",
-      "docs": [
-        "Oracle resolves dispute — can slash practitioner fully"
-      ],
       "discriminator": [
         231,
         6,
@@ -1069,9 +1109,6 @@
         },
         {
           "name": "oracle",
-          "docs": [
-            "Oracle authority — must be protocol authority"
-          ],
           "signer": true
         }
       ],
@@ -1088,9 +1125,6 @@
     },
     {
       "name": "settle_pot",
-      "docs": [
-        "Settle and close a stake pot, distributing tokens by outcome"
-      ],
       "discriminator": [
         120,
         181,
@@ -2004,6 +2038,10 @@
           },
           {
             "name": "practitioner",
+            "type": "pubkey"
+          },
+          {
+            "name": "pot_vault",
             "type": "pubkey"
           },
           {

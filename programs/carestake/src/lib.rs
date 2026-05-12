@@ -2,7 +2,6 @@ use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Mint, Token, TokenAccount, Transfer, MintTo, Burn};
 use anchor_spl::associated_token::AssociatedToken;
 
-
 declare_id!("B3hcYp5nnHH8iWXoEsF2UJpNy82fi7thTHeKJBoNq4pa");
 
 // ─────────────────────────────────────────────
@@ -12,9 +11,9 @@ pub const HEALTH_TOKEN_DECIMALS: u8 = 6;
 pub const MIN_STAKE_AMOUNT: u64 = 100_000_000;       // 100 $HEALTH
 pub const MAX_HEALTH_SCORE: u8 = 100;
 pub const BASELINE_HEALTH_SCORE: u8 = 50;
-pub const SLASH_THRESHOLD: u8 = 60;                  // below 60 = slashing kicks in
-pub const SLASH_RATE_BPS: u64 = 1000;                // 10% slash per negative outcome
-pub const REWARD_RATE_BPS: u64 = 500;                // 5% bonus per positive outcome
+pub const SLASH_THRESHOLD: u8 = 60;
+pub const SLASH_RATE_BPS: u64 = 1000;
+pub const REWARD_RATE_BPS: u64 = 500;
 pub const ORACLE_AUTHORITY_SEED: &[u8] = b"oracle";
 pub const POT_SEED: &[u8] = b"stake_pot";
 pub const PATIENT_SEED: &[u8] = b"patient";
@@ -30,14 +29,11 @@ pub mod crypto_healthcare {
 
     // ── Admin / Bootstrap ─────────────────────
 
-    /// Initialize the global protocol state and $HEALTH token mint
     pub fn initialize_protocol(
         ctx: Context<InitializeProtocol>,
         initial_supply: u64,
     ) -> Result<()> {
-        // Take AccountInfo FIRST (before mutable borrow)
         let protocol_ai = ctx.accounts.protocol_state.to_account_info();
-
         let protocol = &mut ctx.accounts.protocol_state;
         protocol.authority = ctx.accounts.authority.key();
         protocol.health_mint = ctx.accounts.health_mint.key();
@@ -49,7 +45,6 @@ pub mod crypto_healthcare {
         protocol.bump = ctx.bumps.protocol_state;
         protocol.treasury = ctx.accounts.treasury.key();
 
-        // Mint initial supply to treasury
         let seeds = &[b"protocol".as_ref(), &[protocol.bump]];
         let signer = &[&seeds[..]];
         token::mint_to(
@@ -77,15 +72,12 @@ pub mod crypto_healthcare {
 
     // ── Patient Registration ──────────────────
 
-    /// Register a new patient and airdrop onboarding tokens
     pub fn register_patient(
         ctx: Context<RegisterPatient>,
-        name_hash: [u8; 32],          // hashed for privacy
+        name_hash: [u8; 32],
         onboarding_tokens: u64,
     ) -> Result<()> {
         require!(onboarding_tokens >= MIN_STAKE_AMOUNT, HealthError::InsufficientStake);
-
-        // Take AccountInfo FIRST (before mutable borrow)
         let protocol_ai = ctx.accounts.protocol_state.to_account_info();
 
         let patient = &mut ctx.accounts.patient_profile;
@@ -100,7 +92,6 @@ pub mod crypto_healthcare {
         patient.registered_at = Clock::get()?.unix_timestamp;
         patient.bump = ctx.bumps.patient_profile;
 
-        // Airdrop onboarding tokens from treasury
         let protocol = &mut ctx.accounts.protocol_state;
         let bump = protocol.bump;
         let seeds = &[b"protocol".as_ref(), &[bump]];
@@ -132,7 +123,6 @@ pub mod crypto_healthcare {
 
     // ── Practitioner Registration ─────────────
 
-    /// Register a practitioner with specialization and staking capability
     pub fn register_practitioner(
         ctx: Context<RegisterPractitioner>,
         name_hash: [u8; 32],
@@ -145,7 +135,7 @@ pub mod crypto_healthcare {
         prac.wallet = ctx.accounts.practitioner_wallet.key();
         prac.name_hash = name_hash;
         prac.specialization = specialization;
-        prac.reputation_score = 50;   // neutral start
+        prac.reputation_score = 50;
         prac.total_staked = 0;
         prac.total_earned = 0;
         prac.total_slashed = 0;
@@ -156,7 +146,6 @@ pub mod crypto_healthcare {
         prac.registered_at = Clock::get()?.unix_timestamp;
         prac.bump = ctx.bumps.practitioner_profile;
 
-        // Airdrop tokens
         let protocol = &mut ctx.accounts.protocol_state;
         let bump = protocol.bump;
         let seeds = &[b"protocol".as_ref(), &[bump]];
@@ -187,17 +176,14 @@ pub mod crypto_healthcare {
         Ok(())
     }
 
-    // ── Stake Pot ─────────────────────────────
-
-    /// Open a new stake pot between patient and practitioner
+    // ── Stake Pot (Patient Opens) ─────────────────────────────
+    // MODIFIED: Patient opens the pot. Doctor is just a Public Key.
     pub fn open_stake_pot(
         ctx: Context<OpenStakePot>,
         patient_stake: u64,
-        practitioner_stake: u64,
         treatment_duration_days: u16,
     ) -> Result<()> {
         require!(patient_stake >= MIN_STAKE_AMOUNT, HealthError::InsufficientStake);
-        require!(practitioner_stake >= MIN_STAKE_AMOUNT, HealthError::InsufficientStake);
         require!(treatment_duration_days > 0, HealthError::InvalidDuration);
 
         let clock = Clock::get()?;
@@ -205,11 +191,16 @@ pub mod crypto_healthcare {
 
         pot.patient = ctx.accounts.patient_wallet.key();
         pot.practitioner = ctx.accounts.practitioner_wallet.key();
+        
+        // Initially, only patient stakes
         pot.patient_staked = patient_stake;
-        pot.practitioner_staked = practitioner_stake;
-        pot.total_amount = patient_stake + practitioner_stake;
-        pot.patient_share_bps = 5000;       // 50/50 start
-        pot.practitioner_share_bps = 5000;
+        pot.practitioner_staked = 0; 
+        pot.total_amount = patient_stake;
+        
+        // Patient owns 100% initially
+        pot.patient_share_bps = 10000;
+        pot.practitioner_share_bps = 0;
+        
         pot.opened_at = clock.unix_timestamp;
         pot.expires_at = clock.unix_timestamp + (treatment_duration_days as i64 * 86400);
         pot.baseline_health_score = ctx.accounts.patient_profile.health_score;
@@ -217,6 +208,7 @@ pub mod crypto_healthcare {
         pot.session_count = 0;
         pot.status = PotStatus::Active;
         pot.bump = ctx.bumps.stake_pot;
+        pot.pot_vault = ctx.accounts.pot_vault.key(); 
 
         // Transfer patient stake to pot vault
         token::transfer(
@@ -231,7 +223,41 @@ pub mod crypto_healthcare {
             patient_stake,
         )?;
 
-        // Transfer practitioner stake to pot vault
+        // Update patient profile
+        ctx.accounts.patient_profile.active_pots += 1;
+        ctx.accounts.patient_profile.total_staked += patient_stake;
+        
+        // NOTE: We do NOT update practitioner profile here because they haven't joined yet.
+        ctx.accounts.protocol_state.total_pots += 1;
+
+        emit!(StakePotOpened {
+            pot: pot.key(),
+            patient: pot.patient,
+            practitioner: pot.practitioner,
+            patient_stake,
+            practitioner_stake: 0, // 0 initially
+            total: pot.total_amount,
+            baseline_score: pot.baseline_health_score,
+            expires_at: pot.expires_at,
+            timestamp: clock.unix_timestamp,
+        });
+
+        Ok(())
+    }
+
+    // ── NEW: Join Pot (Practitioner Joins) ───────────────────────────
+    // Practitioner sees the pot and decides to join by staking.
+    pub fn join_pot(
+        ctx: Context<JoinPot>,
+        practitioner_stake: u64,
+    ) -> Result<()> {
+        require!(practitioner_stake >= MIN_STAKE_AMOUNT, HealthError::InsufficientStake);
+        
+        let pot = &mut ctx.accounts.stake_pot;
+        // Ensure the person joining is the intended practitioner
+        require!(ctx.accounts.practitioner_wallet.key() == pot.practitioner, HealthError::Unauthorized);
+
+        // Transfer practitioner stake
         token::transfer(
             CpiContext::new(
                 ctx.accounts.token_program.to_account_info(),
@@ -244,31 +270,23 @@ pub mod crypto_healthcare {
             practitioner_stake,
         )?;
 
-        // Update profiles
-        ctx.accounts.patient_profile.active_pots += 1;
-        ctx.accounts.patient_profile.total_staked += patient_stake;
+        // Update Pot
+        pot.practitioner_staked = practitioner_stake;
+        pot.total_amount += practitioner_stake;
+        
+        // Reset shares to 50/50 (or you can add logic to calculate based on ratio)
+        pot.patient_share_bps = 5000;
+        pot.practitioner_share_bps = 5000;
+
+        // Update Practitioner Profile
         ctx.accounts.practitioner_profile.active_pots += 1;
         ctx.accounts.practitioner_profile.total_staked += practitioner_stake;
-        ctx.accounts.protocol_state.total_pots += 1;
-
-        emit!(StakePotOpened {
-            pot: pot.key(),
-            patient: pot.patient,
-            practitioner: pot.practitioner,
-            patient_stake,
-            practitioner_stake,
-            total: pot.total_amount,
-            baseline_score: pot.baseline_health_score,
-            expires_at: pot.expires_at,
-            timestamp: clock.unix_timestamp,
-        });
 
         Ok(())
     }
 
     // ── Session Recording ─────────────────────
 
-    /// Record a treatment session and update health score
     pub fn record_session(
         ctx: Context<RecordSession>,
         new_health_score: u8,
@@ -286,7 +304,6 @@ pub mod crypto_healthcare {
         let old_score = pot.current_health_score;
         let session_id = pot.session_count;
 
-        // Record the session
         let session = &mut ctx.accounts.session_record;
         session.pot = pot.key();
         session.patient = patient.wallet;
@@ -299,7 +316,6 @@ pub mod crypto_healthcare {
         session.recorded_at = clock.unix_timestamp;
         session.bump = ctx.bumps.session_record;
 
-        // Calculate score delta and adjust pot shares
         let (patient_share, prac_share, slash_amount) =
             calculate_shares(old_score, new_health_score, pot.patient_staked, pot.practitioner_staked)?;
 
@@ -308,19 +324,15 @@ pub mod crypto_healthcare {
         pot.practitioner_share_bps = prac_share;
         pot.session_count += 1;
 
-        // Update patient health score
         patient.health_score = new_health_score;
         patient.session_count += 1;
 
-        // Update practitioner stats
         prac.completed_sessions += 1;
         if new_health_score > old_score {
             prac.positive_outcomes += 1;
-            // Update reputation upward (cap at 100)
             prac.reputation_score = prac.reputation_score.saturating_add(2).min(100);
         } else if new_health_score < old_score {
             prac.negative_outcomes += 1;
-            // Reputation hit
             prac.reputation_score = prac.reputation_score.saturating_sub(5);
             ctx.accounts.protocol_state.total_slashed += slash_amount;
             prac.total_slashed += slash_amount;
@@ -343,14 +355,12 @@ pub mod crypto_healthcare {
 
     // ── Settle Pot ────────────────────────────
 
-    /// Settle and close a stake pot, distributing tokens by outcome
     pub fn settle_pot(ctx: Context<SettlePot>) -> Result<()> {
         let clock = Clock::get()?;
         let pot = &mut ctx.accounts.stake_pot;
 
         require!(pot.status == PotStatus::Active, HealthError::PotNotActive);
 
-        // Allow early settlement only if expired or by mutual agreement
         let expired = clock.unix_timestamp >= pot.expires_at;
         require!(expired || pot.session_count > 0, HealthError::PotNotSettleable);
 
@@ -365,7 +375,6 @@ pub mod crypto_healthcare {
         let seeds = &[POT_SEED, pot_key.as_ref(), &[bump]];
         let signer = &[&seeds[..]];
 
-        // Pay patient
         if patient_amount > 0 {
             token::transfer(
                 CpiContext::new_with_signer(
@@ -381,7 +390,6 @@ pub mod crypto_healthcare {
             )?;
         }
 
-        // Pay practitioner
         if practitioner_amount > 0 {
             token::transfer(
                 CpiContext::new_with_signer(
@@ -397,7 +405,6 @@ pub mod crypto_healthcare {
             )?;
         }
 
-        // Update profiles
         ctx.accounts.patient_profile.active_pots = ctx.accounts.patient_profile.active_pots.saturating_sub(1);
         ctx.accounts.patient_profile.total_earned += patient_amount;
         ctx.accounts.practitioner_profile.active_pots = ctx.accounts.practitioner_profile.active_pots.saturating_sub(1);
@@ -421,7 +428,6 @@ pub mod crypto_healthcare {
 
     // ── Dispute / Slash ───────────────────────
 
-    /// Patient raises a dispute — oracle reviews and may slash practitioner
     pub fn raise_dispute(
         ctx: Context<RaiseDispute>,
         reason_hash: [u8; 32],
@@ -443,18 +449,16 @@ pub mod crypto_healthcare {
         Ok(())
     }
 
-    /// Oracle resolves dispute — can slash practitioner fully
     pub fn resolve_dispute(
         ctx: Context<ResolveDispute>,
         favor_patient: bool,
-        slash_percentage: u8,         // 0–100
+        slash_percentage: u8,
     ) -> Result<()> {
         require!(slash_percentage <= 100, HealthError::InvalidSlashPercentage);
         let pot = &mut ctx.accounts.stake_pot;
         require!(pot.status == PotStatus::Disputed, HealthError::PotNotDisputed);
 
         if favor_patient {
-            // Slash practitioner's share and give to patient
             let slash_bps = slash_percentage as u64 * 100;
             let prac_slash = pot.practitioner_staked * slash_bps / 10000;
             pot.patient_share_bps = (pot.patient_share_bps + slash_bps as u16).min(10000);
@@ -464,7 +468,7 @@ pub mod crypto_healthcare {
                 ctx.accounts.practitioner_profile.reputation_score.saturating_sub(10);
         }
 
-        pot.status = PotStatus::Active; // reopen for settlement
+        pot.status = PotStatus::Active;
 
         emit!(DisputeResolved {
             pot: pot.key(),
@@ -478,7 +482,6 @@ pub mod crypto_healthcare {
 
     // ── Health Oracle Update ──────────────────
 
-    /// Trusted oracle updates a patient's verified health score
     pub fn oracle_update_health(
         ctx: Context<OracleUpdateHealth>,
         verified_score: u8,
@@ -505,7 +508,6 @@ pub mod crypto_healthcare {
 //  Share Calculation Logic
 // ─────────────────────────────────────────────
 
-/// Returns (patient_share_bps, practitioner_share_bps, slash_amount)
 pub fn calculate_shares(
     old_score: u8,
     new_score: u8,
@@ -516,16 +518,14 @@ pub fn calculate_shares(
     let mut slash_amount: u64 = 0;
 
     let (patient_bps, prac_bps) = if new_score >= old_score {
-        // Positive or neutral outcome — practitioner earns proportionally more
         let improvement = (new_score - old_score) as u64;
-        let bonus_bps = (improvement * REWARD_RATE_BPS).min(3000); // cap bonus at 30%
+        let bonus_bps = (improvement * REWARD_RATE_BPS).min(3000);
         let prac_share = (5000 + bonus_bps).min(8000) as u16;
         let patient_share = 10000u16 - prac_share;
         (patient_share, prac_share)
     } else {
-        // Negative outcome — patient gets more, practitioner slashed
         let decline = (old_score - new_score) as u64;
-        let slash_bps = (decline * SLASH_RATE_BPS).min(5000); // cap slash at 50%
+        let slash_bps = (decline * SLASH_RATE_BPS).min(5000);
         slash_amount = practitioner_staked * slash_bps / 10000;
         let patient_share = (5000 + slash_bps).min(9000) as u16;
         let prac_share = 10000u16 - patient_share;
@@ -654,6 +654,7 @@ pub struct RegisterPractitioner<'info> {
     pub rent: Sysvar<'info, Rent>,
 }
 
+// ── MODIFIED: OpenStakePot ───────────────────────────────
 #[derive(Accounts)]
 pub struct OpenStakePot<'info> {
     #[account(
@@ -684,18 +685,11 @@ pub struct OpenStakePot<'info> {
     )]
     pub patient_profile: Account<'info, PatientProfile>,
 
-    #[account(
-        mut,
-        seeds = [PRACTITIONER_SEED, practitioner_wallet.key().as_ref()],
-        bump = practitioner_profile.bump,
-    )]
-    pub practitioner_profile: Account<'info, PractitionerProfile>,
+    // REMOVED: practitioner_profile (not needed yet)
+    // REMOVED: practitioner_token_account
 
     #[account(mut)]
     pub patient_token_account: Account<'info, TokenAccount>,
-
-    #[account(mut)]
-    pub practitioner_token_account: Account<'info, TokenAccount>,
 
     #[account(
         mut,
@@ -709,12 +703,47 @@ pub struct OpenStakePot<'info> {
     #[account(mut)]
     pub patient_wallet: Signer<'info>,
 
+    /// CHECK: Practitioner wallet just needs to be passed in as a pubkey for the PDA seed.
+    /// They do not sign this transaction.
     #[account(mut)]
-    pub practitioner_wallet: Signer<'info>,
+    pub practitioner_wallet: AccountInfo<'info>,
 
     pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,
     pub rent: Sysvar<'info, Rent>,
+}
+
+// ── NEW: JoinPot Context ─────────────────────────────────────────
+#[derive(Accounts)]
+pub struct JoinPot<'info> {
+    #[account(
+        mut,
+        seeds = [
+            POT_SEED,
+            stake_pot.patient.as_ref(),
+            stake_pot.practitioner.as_ref()
+        ],
+        bump = stake_pot.bump,
+    )]
+    pub stake_pot: Account<'info, StakePot>,
+
+    #[account(mut)]
+    pub pot_vault: Account<'info, TokenAccount>,
+
+    #[account(
+        mut,
+        seeds = [PRACTITIONER_SEED, practitioner_wallet.key().as_ref()],
+        bump = practitioner_profile.bump
+    )]
+    pub practitioner_profile: Account<'info, PractitionerProfile>,
+
+    #[account(mut)]
+    pub practitioner_token_account: Account<'info, TokenAccount>,
+
+    #[account(mut)]
+    pub practitioner_wallet: Signer<'info>,
+
+    pub token_program: Program<'info, Token>,
 }
 
 #[derive(Accounts)]
@@ -862,7 +891,6 @@ pub struct ResolveDispute<'info> {
     )]
     pub protocol_state: Account<'info, ProtocolState>,
 
-    /// Oracle authority — must be protocol authority
     #[account(constraint = oracle.key() == protocol_state.authority @ HealthError::Unauthorized)]
     pub oracle: Signer<'info>,
 }
@@ -908,7 +936,7 @@ pub struct ProtocolState {
 #[derive(InitSpace)]
 pub struct PatientProfile {
     pub wallet: Pubkey,
-    pub name_hash: [u8; 32],          // SHA256 of name — private
+    pub name_hash: [u8; 32],
     pub health_score: u8,
     pub baseline_score: u8,
     pub total_staked: u64,
@@ -925,7 +953,7 @@ pub struct PractitionerProfile {
     pub wallet: Pubkey,
     pub name_hash: [u8; 32],
     pub specialization: Specialization,
-    pub reputation_score: u8,          // 0–100
+    pub reputation_score: u8,
     pub total_staked: u64,
     pub total_earned: u64,
     pub total_slashed: u64,
@@ -942,10 +970,11 @@ pub struct PractitionerProfile {
 pub struct StakePot {
     pub patient: Pubkey,
     pub practitioner: Pubkey,
+    pub pot_vault: Pubkey,
     pub patient_staked: u64,
     pub practitioner_staked: u64,
     pub total_amount: u64,
-    pub patient_share_bps: u16,        // basis points out of 10000
+    pub patient_share_bps: u16,
     pub practitioner_share_bps: u16,
     pub opened_at: i64,
     pub expires_at: i64,
