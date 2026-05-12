@@ -2041,6 +2041,10 @@
             "type": "pubkey"
           },
           {
+            "name": "pot_vault",
+            "type": "pubkey"
+          },
+          {
             "name": "patient_staked",
             "type": "u64"
           },

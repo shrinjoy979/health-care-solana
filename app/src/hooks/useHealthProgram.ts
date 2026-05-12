@@ -554,26 +554,31 @@ export function useHealthProgram() {
     if (!program || !wallet.publicKey) throw new Error("Wallet not connected");
     setLoading(true);
     try {
+      // 1. Fetch the Pot Account to get the Vault Address
       const potAcc = await (program.account as any).stakePot.fetch(potPublicKey);
-      const mint = potAcc.healthMint; // Need to fetch mint, or from protocol state
 
+      // 2. Get Mint and ATAs
       const [protocolPda] = PublicKey.findProgramAddressSync([PROTOCOL_SEED], PROGRAM_ID);
       const protocolAcc = await (program.account as any).protocolState.fetch(protocolPda);
       const actualMint = protocolAcc.healthMint;
 
       const practitionerAta = await getAssociatedTokenAddress(actualMint, wallet.publicKey);
+      
+      // 3. Get Practitioner PDA
       const [pracPda] = PublicKey.findProgramAddressSync(
         [PRACTITIONER_SEED, wallet.publicKey.toBuffer()], PROGRAM_ID
       );
 
+      // 4. Send Transaction
       const tx = await (program.methods as any)
         .joinPot(new BN(practitionerStake * 1_000_000))
         .accounts({
           stakePot: potPublicKey,
           practitionerProfile: pracPda,
           practitionerTokenAccount: practitionerAta,
-          potVault: potAcc.potVault, // Ensure your program exposes this or derive it
+          potVault: potAcc.potVault, // <--- PASS THE STORED ADDRESS
           practitionerWallet: wallet.publicKey,
+          tokenProgram: TOKEN_PROGRAM_ID,
         })
         .rpc();
 
@@ -588,7 +593,6 @@ export function useHealthProgram() {
   }, [program, wallet.publicKey, fetchAll]);
 
   // ── Record Session ────────────────────────────────────────────────────────
-
   const recordSession = useCallback(async (
     potPublicKey: PublicKey,
     newHealthScore: number,

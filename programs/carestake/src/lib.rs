@@ -208,6 +208,7 @@ pub mod crypto_healthcare {
         pot.session_count = 0;
         pot.status = PotStatus::Active;
         pot.bump = ctx.bumps.stake_pot;
+        pot.pot_vault = ctx.accounts.pot_vault.key(); 
 
         // Transfer patient stake to pot vault
         token::transfer(
@@ -969,6 +970,7 @@ pub struct PractitionerProfile {
 pub struct StakePot {
     pub patient: Pubkey,
     pub practitioner: Pubkey,
+    pub pot_vault: Pubkey,
     pub patient_staked: u64,
     pub practitioner_staked: u64,
     pub total_amount: u64,
