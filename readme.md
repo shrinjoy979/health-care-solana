@@ -1,3 +1,6 @@
+https://github.com/user-attachments/assets/56903f5c-5098-4844-a8d9-e899cbeca74f
+
+
 # CareStake
 
 CareStake is a decentralized healthcare incentive platform built on Solana using Rust and React.
